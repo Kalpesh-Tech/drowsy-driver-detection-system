@@ -1,4 +1,3 @@
-
 import streamlit as st
 import cv2
 import numpy as np
@@ -15,9 +14,46 @@ pygame.mixer.init()
 
 # Flag to check if sound is already playing
 sound_played = False
+# Function to play sound for distracted driver
+distracted_sound_played = False
+
+# Static suggested values for different face types
+static_values_info = """
+### Suggested Values for Drowsy Driver Detection
+
+#### Round Face:
+- **Eye Closure Threshold (EAR):** 0.2
+- **Yawning Threshold (MAR):** 25
+- **Head Pose Threshold (Yaw):** 10
+- **Roll Pose Threshold (Tilt):** 12
+- **Sleep Threshold (seconds):** 2
+
+#### Oval Face:
+- **Eye Closure Threshold (EAR):** 0.25
+- **Yawning Threshold (MAR):** 30
+- **Head Pose Threshold (Yaw):** 12
+- **Roll Pose Threshold (Tilt):** 15
+- **Sleep Threshold (seconds):** 3
+
+#### Square Face:
+- **Eye Closure Threshold (EAR):** 0.3
+- **Yawning Threshold (MAR):** 35
+- **Head Pose Threshold (Yaw):** 15
+- **Roll Pose Threshold (Tilt):** 18
+- **Sleep Threshold (seconds):** 3
+
+#### Heart-shaped Face:
+- **Eye Closure Threshold (EAR):** 0.27
+- **Yawning Threshold (MAR):** 30
+- **Head Pose Threshold (Yaw):** 14
+- **Roll Pose Threshold (Tilt):** 16
+- **Sleep Threshold (seconds):** 2
+"""
+
+
 
 TWILIO_ACCOUNT_SID = "ACc66199ae780625109cd88436500c48ef"
-TWILIO_AUTH_TOKEN = "ea9b6e4d57293534def3557fc3bb5b15"
+TWILIO_AUTH_TOKEN = "b420aae06f6820afdd06fd95c693c85f"
 TWILIO_PHONE_NUMBER = "+12182506379"
 EMERGENCY_CONTACT = "+917218824923"
 
@@ -30,6 +66,7 @@ def play_alert(sound_file):
     pygame.mixer.music.play(loops=-1)
 
 
+
 # Function to play sound non-blocking
 def play_sound_in_thread():
     global sound_played
@@ -37,6 +74,7 @@ def play_sound_in_thread():
         sound_thread = threading.Thread(target=play_alert, args=("alert_beep.mp3",))
         sound_thread.start()
         sound_played = True
+
 
 
 # Function to make an emergency call using Twilio
@@ -74,9 +112,13 @@ sleep_threshold = st.sidebar.slider("Sleeping Detection Threshold (seconds)", 1,
 # Button to start/stop the detection
 start_detection = st.sidebar.button("Start Detection")
 
+# Static information displayed below the "Start Detection" button
+st.markdown(static_values_info)
+
 # Load pre-trained models
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+
 
 
 # Function to compute Euclidean distance
@@ -133,13 +175,13 @@ def detect_head_pose(landmarks, frame_shape):
 
     return pose_angles
 
-
 # Main detection loop
 if start_detection:
     cap = cv2.VideoCapture(0)
     status_display = st.empty()
     video_display = st.image([])
     start_sleep_time = None
+    start_distraction_time = None  # Track distraction start time
     yawn_start_time = None
     fps = 5
 
@@ -154,6 +196,8 @@ if start_detection:
         faces = detector(gray)
         status = "Active"
         color = (0, 255, 0)
+
+
 
         for face in faces:
             landmarks = predictor(gray, face)
@@ -183,9 +227,9 @@ if start_detection:
                 start_sleep_time = None
                 status = "Active!"
                 color = (0, 255, 0)
+
                 sound_played = False
                 pygame.mixer.music.stop()
-
                 emergency_called = False  # RESET when driver is active again
 
             mar = calculate_mar(landmarks)
@@ -194,9 +238,23 @@ if start_detection:
                 color = (0, 255, 255)
 
             pose_angles = detect_head_pose(landmarks, frame.shape)
+
+            # Check head pose for distraction
             if abs(pose_angles[1]) > head_pose_threshold or abs(pose_angles[2]) > roll_pose_threshold:
-                status = "Distracted!"
-                color = (255, 0, 255)
+                if start_distraction_time is None:
+                    start_distraction_time = time.time()  # Start timer
+
+                elif time.time() - start_distraction_time > 5:  # Only trigger if distracted for more than 5 seconds
+                    status = "Distracted!"
+                    color = (255, 0, 255)
+
+                    if not distracted_sound_played:
+                        play_sound_in_thread()
+                        distracted_sound_played = True  # Prevent multiple sound triggers
+
+            else:
+                start_distraction_time = None  # Reset timer if driver is no longer distracted
+                distracted_sound_played = False  # Reset sound flag
 
             status_display.markdown(f"### Status: {status}")
             cv2.putText(frame, status, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
